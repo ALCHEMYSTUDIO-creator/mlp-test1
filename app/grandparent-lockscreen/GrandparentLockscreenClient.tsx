@@ -108,7 +108,7 @@ export default function GrandparentLockscreenClient() {
 
       <nav className="flex flex-wrap justify-center gap-5 pb-1 text-sm font-bold text-[#6e563c]">
         <Link href="/grandparent">조부모 화면</Link>
-        <Link href="/archive">가족 추억 보기</Link>
+        <Link href="/archive">사진·음성 기록하기</Link>
         <Link href="/">처음으로</Link>
       </nav>
     </MobileFrame>

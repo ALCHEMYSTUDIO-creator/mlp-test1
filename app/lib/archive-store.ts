@@ -13,6 +13,12 @@ export type ArchiveItem = {
   voiceNoteLabel?: string;
   gardenLevelAtThatTime?: number;
   waterCountAtThatTime?: number;
+  hasLocalImage?: boolean;
+  hasLocalVoice?: boolean;
+  localImageId?: string;
+  localVoiceId?: string;
+  voiceDurationLabel?: string;
+  localOnly?: true;
 };
 
 const ARCHIVE_STORAGE_KEY = "ilgram-archive";

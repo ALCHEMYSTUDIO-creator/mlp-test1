@@ -134,7 +134,7 @@ export default function GrandparentClient() {
         <Link href="/">처음으로</Link>
         <Link href="/grandchild">손주 화면 보기</Link>
         <Link href="/grandparent-lockscreen">잠금화면 보기</Link>
-        <Link href="/archive">가족 추억 보기</Link>
+        <Link href="/archive">사진·음성 기록하기</Link>
       </nav>
     </MobileFrame>
   );

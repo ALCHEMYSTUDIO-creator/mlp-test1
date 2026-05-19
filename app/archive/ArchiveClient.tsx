@@ -1,11 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { BigButton } from "@/app/components/BigButton";
 import { MobileFrame } from "@/app/components/MobileFrame";
 import { type ArchiveItem, useArchiveStore } from "@/app/lib/archive-store";
 import { useIlgramState } from "@/app/lib/ilgram-store";
+import { getLocalMedia, saveLocalMedia } from "@/app/lib/local-media-store";
 
 export default function ArchiveClient() {
   const { state } = useIlgramState();
@@ -17,22 +18,163 @@ export default function ArchiveClient() {
   const [grandparentReply, setGrandparentReply] =
     useState("사진 보내줘서 좋다.");
   const [hasImagePreview, setHasImagePreview] = useState(false);
+  const [selectedImage, setSelectedImage] = useState<Blob | null>(null);
+  const [selectedImageUrl, setSelectedImageUrl] = useState("");
   const [voiceNoteLabel, setVoiceNoteLabel] = useState("");
+  const [voiceBlob, setVoiceBlob] = useState<Blob | null>(null);
+  const [voiceUrl, setVoiceUrl] = useState("");
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingFallbackMessage, setRecordingFallbackMessage] = useState("");
   const [statusMessage, setStatusMessage] = useState("");
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const recordingChunksRef = useRef<Blob[]>([]);
+  const recordingStartedAtRef = useRef(0);
+  const imageObjectUrlRef = useRef("");
+  const voiceObjectUrlRef = useRef("");
 
-  const saveArchiveItem = () => {
+  const saveArchiveItem = async () => {
+    const localImageId = selectedImage ? createLocalMediaId("image") : undefined;
+    const localVoiceId = voiceBlob ? createLocalMediaId("voice") : undefined;
+
+    try {
+      if (selectedImage && localImageId) {
+        await saveLocalMedia(localImageId, selectedImage);
+      }
+      if (voiceBlob && localVoiceId) {
+        await saveLocalMedia(localVoiceId, voiceBlob);
+      }
+    } catch {
+      setStatusMessage("미디어는 mock으로 표시돼요.");
+    }
+
     addArchiveItem({
       missionTitle,
       senderRole: "grandchild",
       message,
       grandparentReply,
-      imagePreview: hasImagePreview ? "sky" : undefined,
+      imagePreview: hasImagePreview || selectedImage ? "sky" : undefined,
       voiceNoteLabel: voiceNoteLabel || undefined,
+      hasLocalImage: Boolean(selectedImage || hasImagePreview),
+      hasLocalVoice: Boolean(voiceBlob || voiceNoteLabel),
+      localImageId,
+      localVoiceId,
+      voiceDurationLabel: voiceNoteLabel || undefined,
+      localOnly: true,
       gardenLevelAtThatTime: state.gardenLevel,
       waterCountAtThatTime: state.waterCount,
     });
-    setStatusMessage("추억 카드가 저장됐어요.");
+    setStatusMessage(
+      "보낸 기기에 기록됐어요. 상대에게 실제 전송되지는 않는 MVP 시뮬레이션입니다.",
+    );
   };
+
+  const handleImageChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) {
+      return;
+    }
+
+    if (imageObjectUrlRef.current) {
+      URL.revokeObjectURL(imageObjectUrlRef.current);
+    }
+
+    const objectUrl = URL.createObjectURL(file);
+    imageObjectUrlRef.current = objectUrl;
+    setSelectedImage(file);
+    setSelectedImageUrl(objectUrl);
+    setHasImagePreview(true);
+  };
+
+  const addSkyMock = () => {
+    setHasImagePreview(true);
+    setSelectedImage(null);
+    setSelectedImageUrl("");
+  };
+
+  const startRecording = async () => {
+    setRecordingFallbackMessage("");
+
+    if (
+      typeof window === "undefined" ||
+      !navigator.mediaDevices?.getUserMedia ||
+      !("MediaRecorder" in window)
+    ) {
+      setVoiceNoteLabel("음성 메시지 12초");
+      setRecordingFallbackMessage(
+        "이 기기에서는 실제 녹음 대신 음성메모 mock으로 저장돼요.",
+      );
+      return;
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream);
+      recordingChunksRef.current = [];
+      recordingStartedAtRef.current = Date.now();
+
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          recordingChunksRef.current.push(event.data);
+        }
+      };
+
+      recorder.onstop = () => {
+        const blob = new Blob(recordingChunksRef.current, {
+          type: recorder.mimeType || "audio/webm",
+        });
+        const seconds = Math.max(
+          1,
+          Math.round((Date.now() - recordingStartedAtRef.current) / 1000),
+        );
+
+        if (voiceObjectUrlRef.current) {
+          URL.revokeObjectURL(voiceObjectUrlRef.current);
+        }
+
+        const objectUrl = URL.createObjectURL(blob);
+        voiceObjectUrlRef.current = objectUrl;
+        setVoiceBlob(blob);
+        setVoiceUrl(objectUrl);
+        setVoiceNoteLabel(`음성 메시지 ${seconds}초`);
+        setIsRecording(false);
+        stream.getTracks().forEach((track) => track.stop());
+      };
+
+      mediaRecorderRef.current = recorder;
+      recorder.start();
+      setIsRecording(true);
+    } catch {
+      setVoiceNoteLabel("음성 메시지 12초");
+      setRecordingFallbackMessage(
+        "이 기기에서는 실제 녹음 대신 음성메모 mock으로 저장돼요.",
+      );
+      setIsRecording(false);
+    }
+  };
+
+  const stopRecording = () => {
+    if (mediaRecorderRef.current?.state === "recording") {
+      mediaRecorderRef.current.stop();
+    }
+  };
+
+  const addMockVoice = () => {
+    setVoiceNoteLabel("음성 메시지 12초");
+    setRecordingFallbackMessage(
+      "이 기기에서는 실제 녹음 대신 음성메모 mock으로 저장돼요.",
+    );
+  };
+
+  useEffect(() => {
+    return () => {
+      if (imageObjectUrlRef.current) {
+        URL.revokeObjectURL(imageObjectUrlRef.current);
+      }
+      if (voiceObjectUrlRef.current) {
+        URL.revokeObjectURL(voiceObjectUrlRef.current);
+      }
+    };
+  }, []);
 
   return (
     <MobileFrame title="가족 추억 기록">
@@ -51,6 +193,10 @@ export default function ArchiveClient() {
         </p>
         <p className="mt-1 text-sm font-medium text-[#7d664f]">
           사진과 음성은 MVP용 mock으로 저장됩니다.
+        </p>
+        <p className="mt-1 text-xs font-semibold leading-5 text-[#7d664f]">
+          이 MVP에서는 사진과 음성이 현재 기기 안에서만 저장됩니다. 실제
+          상대방에게 전송되지는 않습니다.
         </p>
 
         <label className="mt-4 block">
@@ -84,19 +230,53 @@ export default function ArchiveClient() {
           />
         </label>
 
-        {hasImagePreview ? <SkyPhotoMock /> : null}
+        {selectedImageUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            alt="선택한 사진 미리보기"
+            className="mt-4 max-h-56 w-full rounded-2xl border border-[#d7e2e8] object-cover"
+            src={selectedImageUrl}
+          />
+        ) : hasImagePreview ? (
+          <SkyPhotoMock />
+        ) : null}
 
         <div className="mt-4 grid gap-2">
+          <label className="rounded-xl border border-[#d5e2cf] bg-[#edf3e8] px-4 py-3 text-center text-sm font-bold text-[#35533a]">
+            사진 선택
+            <input
+              accept="image/*"
+              className="sr-only"
+              onChange={handleImageChange}
+              type="file"
+            />
+          </label>
           <button
             className="rounded-xl border border-[#d5e2cf] bg-[#edf3e8] px-4 py-3 text-sm font-bold text-[#35533a]"
-            onClick={() => setHasImagePreview(true)}
+            onClick={addSkyMock}
             type="button"
           >
             하늘 사진 추가
           </button>
           <button
             className="rounded-xl border border-[#e4d6c2] bg-white px-4 py-3 text-sm font-bold text-[#5f5144]"
-            onClick={() => setVoiceNoteLabel("음성 메시지 12초")}
+            disabled={isRecording}
+            onClick={startRecording}
+            type="button"
+          >
+            녹음 시작
+          </button>
+          <button
+            className="rounded-xl border border-[#e4d6c2] bg-white px-4 py-3 text-sm font-bold text-[#5f5144] disabled:opacity-50"
+            disabled={!isRecording}
+            onClick={stopRecording}
+            type="button"
+          >
+            녹음 종료
+          </button>
+          <button
+            className="rounded-xl border border-[#e4d6c2] bg-white px-4 py-3 text-sm font-bold text-[#5f5144]"
+            onClick={addMockVoice}
             type="button"
           >
             음성 메시지 추가
@@ -106,6 +286,16 @@ export default function ArchiveClient() {
         {voiceNoteLabel ? (
           <p className="mt-3 rounded-xl bg-[#f7f1e8] px-4 py-3 text-sm font-semibold text-[#5f5144]">
             {voiceNoteLabel}
+          </p>
+        ) : null}
+        {voiceUrl ? (
+          <audio className="mt-3 w-full" controls src={voiceUrl}>
+            다시 듣기
+          </audio>
+        ) : null}
+        {recordingFallbackMessage ? (
+          <p className="mt-3 text-xs font-semibold leading-5 text-[#7d664f]">
+            {recordingFallbackMessage}
           </p>
         ) : null}
 
@@ -188,18 +378,130 @@ function ArchiveCard({
       </div>
 
       {item.imagePreview ? <SkyPhotoMock compact /> : null}
+      {item.hasLocalImage ? (
+        <LocalImagePreview localImageId={item.localImageId} />
+      ) : null}
 
       <div className="mt-3 grid gap-2 text-sm font-semibold leading-6 text-[#5f5144]">
         <p>손주: {item.message}</p>
         <p>조부모: {item.grandparentReply}</p>
-        {item.voiceNoteLabel ? <p>{item.voiceNoteLabel}</p> : null}
+        {item.voiceDurationLabel || item.voiceNoteLabel ? (
+          <p>{item.voiceDurationLabel ?? item.voiceNoteLabel}</p>
+        ) : null}
+        {item.hasLocalVoice ? (
+          <LocalVoicePreview localVoiceId={item.localVoiceId} />
+        ) : null}
         <p>
           당시 정원: Lv. {item.gardenLevelAtThatTime ?? 0} · 물{" "}
           {item.waterCountAtThatTime ?? 0}번
         </p>
+        {item.localOnly ? (
+          <p className="text-xs text-[#7d664f]">이 기기에만 저장됨</p>
+        ) : null}
       </div>
     </article>
   );
+}
+
+function LocalImagePreview({ localImageId }: { localImageId?: string }) {
+  const [imageUrl, setImageUrl] = useState("");
+
+  useEffect(() => {
+    let objectUrl = "";
+    let isMounted = true;
+
+    if (!localImageId) {
+      return;
+    }
+
+    getLocalMedia(localImageId)
+      .then((storedMedia) => {
+        if (!storedMedia || !isMounted) {
+          return;
+        }
+        objectUrl = URL.createObjectURL(storedMedia.blob);
+        setImageUrl(objectUrl);
+      })
+      .catch(() => {
+        setImageUrl("");
+      });
+
+    return () => {
+      isMounted = false;
+      if (objectUrl) {
+        URL.revokeObjectURL(objectUrl);
+      }
+    };
+  }, [localImageId]);
+
+  if (!localImageId || !imageUrl) {
+    return null;
+  }
+
+  return (
+    <>
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        alt="저장된 사진"
+        className="mt-3 max-h-56 w-full rounded-2xl border border-[#d7e2e8] object-cover"
+        src={imageUrl}
+      />
+    </>
+  );
+}
+
+function LocalVoicePreview({ localVoiceId }: { localVoiceId?: string }) {
+  const [voiceUrl, setVoiceUrl] = useState("");
+
+  useEffect(() => {
+    let objectUrl = "";
+    let isMounted = true;
+
+    if (!localVoiceId) {
+      return;
+    }
+
+    getLocalMedia(localVoiceId)
+      .then((storedMedia) => {
+        if (!storedMedia || !isMounted) {
+          return;
+        }
+        objectUrl = URL.createObjectURL(storedMedia.blob);
+        setVoiceUrl(objectUrl);
+      })
+      .catch(() => {
+        setVoiceUrl("");
+      });
+
+    return () => {
+      isMounted = false;
+      if (objectUrl) {
+        URL.revokeObjectURL(objectUrl);
+      }
+    };
+  }, [localVoiceId]);
+
+  if (!localVoiceId) {
+    return null;
+  }
+
+  if (!voiceUrl) {
+    return <p>음성메모 저장됨</p>;
+  }
+
+  return (
+    <audio className="w-full" controls src={voiceUrl}>
+      음성메모 저장됨
+    </audio>
+  );
+}
+
+function createLocalMediaId(prefix: string) {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+    return `${prefix}-${crypto.randomUUID()}`;
+  }
+
+  return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
 function SkyPhotoMock({ compact = false }: { compact?: boolean }) {
