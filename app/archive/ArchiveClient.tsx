@@ -31,6 +31,82 @@ export default function ArchiveClient() {
   const recordingStartedAtRef = useRef(0);
   const imageObjectUrlRef = useRef("");
   const voiceObjectUrlRef = useRef("");
+  const visualizerCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const visualizerFrameRef = useRef<number | null>(null);
+  const activeStreamRef = useRef<MediaStream | null>(null);
+
+  const cleanupRecordingResources = () => {
+    if (visualizerFrameRef.current !== null) {
+      cancelAnimationFrame(visualizerFrameRef.current);
+      visualizerFrameRef.current = null;
+    }
+
+    activeStreamRef.current?.getTracks().forEach((track) => track.stop());
+    activeStreamRef.current = null;
+
+    void audioContextRef.current?.close();
+    audioContextRef.current = null;
+    analyserRef.current = null;
+  };
+
+  const drawVoiceVisualizer = () => {
+    const canvas = visualizerCanvasRef.current;
+    const analyser = analyserRef.current;
+
+    if (!canvas || !analyser) {
+      visualizerFrameRef.current = requestAnimationFrame(drawVoiceVisualizer);
+      return;
+    }
+
+    const context = canvas.getContext("2d");
+    if (!context) {
+      return;
+    }
+
+    const data = new Uint8Array(analyser.frequencyBinCount);
+    analyser.getByteFrequencyData(data);
+    context.clearRect(0, 0, canvas.width, canvas.height);
+
+    const barCount = 20;
+    const gap = 5;
+    const barWidth = (canvas.width - gap * (barCount - 1)) / barCount;
+
+    for (let index = 0; index < barCount; index += 1) {
+      const dataIndex = Math.floor((index / barCount) * data.length);
+      const value = data[dataIndex] ?? 0;
+      const height = Math.max(6, (value / 255) * (canvas.height - 12));
+      const x = index * (barWidth + gap);
+      const y = canvas.height - height;
+
+      context.fillStyle = "#496b4f";
+      drawRoundedBar(context, x, y, barWidth, height, 6);
+    }
+
+    visualizerFrameRef.current = requestAnimationFrame(drawVoiceVisualizer);
+  };
+
+  const startVoiceVisualizer = (stream: MediaStream) => {
+    const windowWithAudio = window as Window &
+      typeof globalThis & { webkitAudioContext?: typeof AudioContext };
+    const AudioContextConstructor =
+      windowWithAudio.AudioContext ?? windowWithAudio.webkitAudioContext;
+
+    if (!AudioContextConstructor) {
+      throw new Error("AudioContext is not available");
+    }
+
+    const audioContext = new AudioContextConstructor();
+    const analyser = audioContext.createAnalyser();
+    const source = audioContext.createMediaStreamSource(stream);
+
+    analyser.fftSize = 64;
+    source.connect(analyser);
+    audioContextRef.current = audioContext;
+    analyserRef.current = analyser;
+    drawVoiceVisualizer();
+  };
 
   const saveArchiveItem = async () => {
     const localImageId = selectedImage ? createLocalMediaId("image") : undefined;
@@ -97,7 +173,8 @@ export default function ArchiveClient() {
     if (
       typeof window === "undefined" ||
       !navigator.mediaDevices?.getUserMedia ||
-      !("MediaRecorder" in window)
+      !("MediaRecorder" in window) ||
+      !("AudioContext" in window || "webkitAudioContext" in window)
     ) {
       setVoiceNoteLabel("음성 메시지 12초");
       setRecordingFallbackMessage(
@@ -109,8 +186,10 @@ export default function ArchiveClient() {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const recorder = new MediaRecorder(stream);
+      activeStreamRef.current = stream;
       recordingChunksRef.current = [];
       recordingStartedAtRef.current = Date.now();
+      startVoiceVisualizer(stream);
 
       recorder.ondataavailable = (event) => {
         if (event.data.size > 0) {
@@ -137,13 +216,14 @@ export default function ArchiveClient() {
         setVoiceUrl(objectUrl);
         setVoiceNoteLabel(`음성 메시지 ${seconds}초`);
         setIsRecording(false);
-        stream.getTracks().forEach((track) => track.stop());
+        cleanupRecordingResources();
       };
 
       mediaRecorderRef.current = recorder;
       recorder.start();
       setIsRecording(true);
     } catch {
+      cleanupRecordingResources();
       setVoiceNoteLabel("음성 메시지 12초");
       setRecordingFallbackMessage(
         "이 기기에서는 실제 녹음 대신 음성메모 mock으로 저장돼요.",
@@ -155,7 +235,10 @@ export default function ArchiveClient() {
   const stopRecording = () => {
     if (mediaRecorderRef.current?.state === "recording") {
       mediaRecorderRef.current.stop();
+      return;
     }
+
+    cleanupRecordingResources();
   };
 
   const addMockVoice = () => {
@@ -173,6 +256,7 @@ export default function ArchiveClient() {
       if (voiceObjectUrlRef.current) {
         URL.revokeObjectURL(voiceObjectUrlRef.current);
       }
+      cleanupRecordingResources();
     };
   }, []);
 
@@ -287,6 +371,26 @@ export default function ArchiveClient() {
           <p className="mt-3 rounded-xl bg-[#f7f1e8] px-4 py-3 text-sm font-semibold text-[#5f5144]">
             {voiceNoteLabel}
           </p>
+        ) : null}
+        {isRecording ? (
+          <section className="mt-3 rounded-xl border border-[#d5e2cf] bg-[#fbfaf5] p-4">
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-sm font-bold text-[#35533a]">녹음 중이에요.</p>
+              <p className="text-xs font-semibold text-[#7d664f]">
+                종료하면 다시 들을 수 있어요.
+              </p>
+            </div>
+            <canvas
+              aria-label="말소리에 맞춰 움직이는 녹음 막대"
+              className="mt-3 h-16 w-full rounded-xl bg-white"
+              height={64}
+              ref={visualizerCanvasRef}
+              width={320}
+            />
+            <p className="mt-2 text-xs font-semibold text-[#7d664f]">
+              말소리에 맞춰 움직여요.
+            </p>
+          </section>
         ) : null}
         {voiceUrl ? (
           <audio className="mt-3 w-full" controls src={voiceUrl}>
@@ -494,6 +598,33 @@ function LocalVoicePreview({ localVoiceId }: { localVoiceId?: string }) {
       음성메모 저장됨
     </audio>
   );
+}
+
+function drawRoundedBar(
+  context: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  radius: number,
+) {
+  const safeRadius = Math.min(radius, width / 2, height / 2);
+  context.beginPath();
+  context.moveTo(x + safeRadius, y);
+  context.lineTo(x + width - safeRadius, y);
+  context.quadraticCurveTo(x + width, y, x + width, y + safeRadius);
+  context.lineTo(x + width, y + height - safeRadius);
+  context.quadraticCurveTo(
+    x + width,
+    y + height,
+    x + width - safeRadius,
+    y + height,
+  );
+  context.lineTo(x + safeRadius, y + height);
+  context.quadraticCurveTo(x, y + height, x, y + height - safeRadius);
+  context.lineTo(x, y + safeRadius);
+  context.quadraticCurveTo(x, y, x + safeRadius, y);
+  context.fill();
 }
 
 function createLocalMediaId(prefix: string) {
