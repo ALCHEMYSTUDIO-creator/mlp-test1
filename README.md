@@ -1,36 +1,92 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# 일그람
 
-## Getting Started
+일그람은 조부모와 손주 사이의 연락을 작은 미션과 가족 정원으로 반복하게 만드는 정서 연결 서비스입니다.
 
-First, run the development server:
+## MVP 목적
+
+이번 2차 MVP는 앱 전체 완성이 아니라, 손주가 맥락형 알림을 보고 조부모에게 연락한 뒤 가족 정원을 키우는 흐름이 반복 행동을 만들 수 있는지 검증하기 위한 모바일 웹 프로토타입입니다.
+
+## 주요 라우트
+
+- `/`: 역할 선택 랜딩
+- `/grandchild`: 손주용 인터페이스
+- `/grandparent`: 조부모용 인터페이스
+- `/demo-lockscreen`: 잠금화면/알림/위젯 진입 시뮬레이션
+
+## 검증 가설
+
+“사용자 맥락형 알림과 가족 정원 게이미피케이션이 손주가 조부모에게 연락하는 행동을 반복하게 만드는가?”
+
+## 실제 구현 기능
+
+- `localStorage` 기반 공통 상태 저장
+- 손주 화면의 맥락 설정 저장
+- 오늘의 미션 완료 체크
+- 추천 문구 복사
+- 정원 물 주기
+- `streak`, `gardenLevel`, `waterCount`, `records` 업데이트
+- 조부모 화면에서 손주의 오늘 안부와 가족 정원 상태 확인
+- 조부모 화면의 큰 버튼 기반 mock 반응 기록
+- 새로고침 후 상태 유지
+
+공유 상태 키는 `ilgram-state`이며 주요 필드는 다음과 같습니다.
+
+- `gardenLevel`
+- `waterCount`
+- `streak`
+- `missionCompleted`
+- `lastMissionDate`
+- `contextSettings`
+- `records`
+
+## 시뮬레이션 기능
+
+- iOS 알림/잠금화면 위젯 기반 앱 진입 경험
+- Android 알림/홈 위젯 기반 앱 진입 경험
+- Android 위젯의 오늘 미션 완료/미완료 문구 변경
+- 실제 푸시 알림, 실제 OS 잠금화면 점유, 실제 위젯, 실제 카카오톡 연동, 실제 음성 녹음, 실제 전화 연결은 구현하지 않습니다.
+
+## 실행 방법
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+브라우저에서 `http://localhost:3000`을 엽니다.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+프로덕션 빌드 확인:
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```bash
+npm run build
+```
 
-## Learn More
+## 실제 제품화 시 추가 개발이 필요한 부분
 
-To learn more about Next.js, take a look at the following resources:
+### iOS
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+- APNs 기반 실제 푸시 알림
+- 알림 권한 요청과 권한 상태별 안내
+- WidgetKit 기반 홈 화면/잠금화면 위젯
+- iOS 정책에 맞는 제한적 잠금화면 진입 UX 설계
+- 딥링크 또는 Universal Links 기반 알림 클릭 후 앱 진입
+- 카카오톡 공유 또는 메시지 전송 플로우 연동 검토
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+### Android
 
-## Deploy on Vercel
+- FCM 기반 실제 푸시 알림
+- Android App Widget 구현
+- 알림 액션 버튼과 딥링크 처리
+- 홈 화면 위젯 상태 동기화
+- 제조사별 배터리 최적화/알림 제한 대응
+- 카카오톡 공유 또는 메시지 전송 플로우 연동 검토
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+### 공통
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- 로그인 및 가족 연결
+- 서버 DB 저장
+- 미션 스케줄링
+- 기록/정원 상태 동기화
+- 실제 이미지 업로드
+- 음성 답장 녹음 및 재생
+- 접근성 테스트와 고령 사용자 대상 사용성 검증
